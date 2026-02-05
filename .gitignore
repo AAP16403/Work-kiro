@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+
+# PyInstaller
+build/
+dist/
+*.spec.user
+
+# Local runtime/config outputs
+psg_config.json
+psg_activity.log
+release/
+
+# Editor/OS
+.DS_Store
+Thumbs.db
