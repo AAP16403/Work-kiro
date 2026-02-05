@@ -36,7 +36,7 @@ def find_tesseract():
         os.path.join(get_base_dir(), 'tesseract.exe'),
         os.path.join(get_base_dir(), 'tesseract-ocr', 'tesseract.exe')
     ]
-    
+
     # Also check PATH environment variable
     try:
         result = subprocess.run(['where', 'tesseract.exe'], capture_output=True, text=True, timeout=2)
@@ -46,12 +46,12 @@ def find_tesseract():
                 return path
     except Exception:
         pass
-    
+
     # Check possible paths
     for path in possible_paths:
         if os.path.exists(path):
             return path
-    
+
     # Default if nothing found
     return possible_paths[0]
 
@@ -384,7 +384,7 @@ class App:
         self.tray = TrayController(self)
 
         self._apply_ui_scale(self.settings.get('ui_scale', 1.0))
-        
+
         # First-run setup check
         self._check_first_run()
 
@@ -394,7 +394,7 @@ class App:
 
         self.root.bind('<Unmap>', self._on_unmap)
         self.root.protocol('WM_DELETE_WINDOW', self._on_close)
-    
+
     def _check_first_run(self):
         """Check and alert on first run if Tesseract is not found."""
         tess_path = self.settings.get('tesseract_cmd', '')
@@ -500,18 +500,18 @@ class App:
         canvas = tk.Canvas(self.root)
         scrollbar = ttk.Scrollbar(self.root, orient='vertical', command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
-        
+
         scrollable_frame.bind(
             '<Configure>',
             lambda e: canvas.configure(scrollregion=canvas.bbox('all'))
         )
-        
+
         canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
         canvas.configure(yscrollcommand=scrollbar.set)
-        
+
         canvas.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
-        
+
         frm = ttk.Frame(scrollable_frame, padding=12)
         frm.pack(fill='both', expand=True)
 
@@ -560,7 +560,7 @@ class App:
 
         # Cleanup settings
         ttk.Separator(settings_frame, orient='horizontal').grid(row=7, column=0, columnspan=2, sticky='we', pady=6)
-        
+
         ttk.Label(settings_frame, text='Cleanup interval (hours):').grid(row=8, column=0, sticky='w')
         self.cleanup_interval_var = tk.DoubleVar(value=self.settings.get('cleanup_interval_hours', 24))
         ttk.Spinbox(settings_frame, from_=1, to=720, increment=1, textvariable=self.cleanup_interval_var, width=6).grid(row=8, column=1, sticky='w')
@@ -647,7 +647,7 @@ class App:
 
         for i in range(2):
             settings_frame.grid_columnconfigure(i, weight=1)
-        
+
         # Info label
         info_frame = ttk.Frame(frm)
         info_frame.pack(fill='x', pady=6)
