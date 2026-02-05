@@ -83,7 +83,6 @@ DEFAULT_SETTINGS = {
     "cleanup_cache": True,
     "start_minimized": False,
     "minimize_to_tray": True,
-    "ui_scale": 1.0
 }
 
 def load_settings():
@@ -362,7 +361,8 @@ class App:
     def __init__(self, root):
         self.root = root
         self.root.title('Privacy Screen Guard')
-        self.root.geometry('600x700')
+        self.root.minsize(560, 540)
+        self.root.resizable(True, True)
         self.settings = load_settings()
 
         self.style = ttk.Style(self.root)
@@ -380,10 +380,7 @@ class App:
         self._overlay_active = False
         self._overlay = None
         self._ignore_unmap = False
-        self._scale_after_id = None
         self.tray = TrayController(self)
-
-        self._apply_ui_scale(self.settings.get('ui_scale', 1.0))
 
         # First-run setup check
         self._check_first_run()
@@ -391,6 +388,7 @@ class App:
         self.checker = ScreenChecker(self.settings, on_detect=self._on_detect_threadsafe)
 
         self._build_ui()
+        self._set_initial_geometry()
 
         self.root.bind('<Unmap>', self._on_unmap)
         self.root.protocol('WM_DELETE_WINDOW', self._on_close)
@@ -407,26 +405,19 @@ class App:
             )
             print('[WARNING] Tesseract not found. Please install and configure the path.')
 
-    def _apply_ui_scale(self, scale):
+    def _set_initial_geometry(self):
         try:
-            scale_f = float(scale)
-            scale_f = max(0.75, min(2.0, scale_f))
-            self.root.tk.call('tk', 'scaling', scale_f)
-            try:
-                self.root.update_idletasks()
-            except Exception:
-                pass
-        except Exception:
-            pass
+            self.root.update_idletasks()
+            req_w = self.root.winfo_reqwidth()
+            req_h = self.root.winfo_reqheight()
+            screen_w = self.root.winfo_screenwidth()
+            screen_h = self.root.winfo_screenheight()
 
-    def _schedule_apply_ui_scale(self, scale):
-        try:
-            if self._scale_after_id is not None:
-                try:
-                    self.root.after_cancel(self._scale_after_id)
-                except Exception:
-                    pass
-            self._scale_after_id = self.root.after(75, lambda: self._apply_ui_scale(scale))
+            w = min(max(req_w + 40, 640), int(screen_w * 0.8))
+            h = min(max(req_h + 40, 620), int(screen_h * 0.85))
+            x = max(0, int((screen_w - w) / 2))
+            y = max(0, int((screen_h - h) / 3))
+            self.root.geometry(f'{w}x{h}+{x}+{y}')
         except Exception:
             pass
 
@@ -496,86 +487,112 @@ class App:
         self.show_blur(screenshot_image, settings)
 
     def _build_ui(self):
-        # Create scrollable frame for small windows
-        canvas = tk.Canvas(self.root)
-        scrollbar = ttk.Scrollbar(self.root, orient='vertical', command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
+        container = ttk.Frame(self.root, padding=12)
+        container.grid(row=0, column=0, sticky='nsew')
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
 
-        scrollable_frame.bind(
-            '<Configure>',
-            lambda e: canvas.configure(scrollregion=canvas.bbox('all'))
-        )
+        notebook = ttk.Notebook(container)
+        notebook.grid(row=0, column=0, sticky='nsew')
+        container.grid_rowconfigure(0, weight=1)
+        container.grid_columnconfigure(0, weight=1)
 
-        canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
-        canvas.configure(yscrollcommand=scrollbar.set)
+        tab_main = ttk.Frame(notebook, padding=12)
+        tab_settings = ttk.Frame(notebook, padding=12)
+        notebook.add(tab_main, text='Main')
+        notebook.add(tab_settings, text='Settings')
 
-        canvas.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
+        # --- Main tab ---
+        tab_main.grid_columnconfigure(0, weight=1)
 
-        frm = ttk.Frame(scrollable_frame, padding=12)
-        frm.pack(fill='both', expand=True)
-
-        # Controls
-        btn_row = ttk.Frame(frm)
-        btn_row.pack(fill='x', pady=6)
+        btn_row = ttk.Frame(tab_main)
+        btn_row.grid(row=0, column=0, sticky='w', pady=(0, 10))
         self.start_btn = ttk.Button(btn_row, text='Start', command=self.start)
-        self.start_btn.pack(side='left')
+        self.start_btn.grid(row=0, column=0, sticky='w')
         self.stop_btn = ttk.Button(btn_row, text='Stop', command=self.stop)
-        self.stop_btn.pack(side='left', padx=6)
+        self.stop_btn.grid(row=0, column=1, sticky='w', padx=6)
         self.stop_btn.state(['disabled'])
         self.test_btn = ttk.Button(btn_row, text='Test Blur', command=self._test_blur)
-        self.test_btn.pack(side='left')
+        self.test_btn.grid(row=0, column=2, sticky='w')
 
-        # Settings
-        settings_frame = ttk.LabelFrame(frm, text='Settings')
-        settings_frame.pack(fill='both', expand=True, pady=6)
+        status_frame = ttk.LabelFrame(tab_main, text='Status')
+        status_frame.grid(row=1, column=0, sticky='ew')
+        status_frame.grid_columnconfigure(0, weight=1)
+        status_frame.grid_columnconfigure(1, weight=1)
+        self.status_var = tk.StringVar(value='Idle')
+        self.status_label = ttk.Label(status_frame, textvariable=self.status_var)
+        self.status_label.grid(row=0, column=0, sticky='w', padx=8, pady=6)
+        self.last_check_var = tk.StringVar(value='Checks: 0')
+        self.last_check_label = ttk.Label(status_frame, textvariable=self.last_check_var)
+        self.last_check_label.grid(row=0, column=1, sticky='e', padx=8, pady=6)
 
-        # intervals
+        actions = ttk.Frame(tab_main)
+        actions.grid(row=2, column=0, sticky='w', pady=(10, 0))
+        ttk.Button(actions, text='Save Settings', command=self.save).grid(row=0, column=0, sticky='w')
+        ttk.Button(actions, text='Clean Now', command=self.cleanup_now).grid(row=0, column=1, sticky='w', padx=6)
+        if self.tray.available:
+            ttk.Button(actions, text='Show Tray Icon', command=self.tray.start).grid(row=0, column=2, sticky='w', padx=6)
+
+        info_text = f'Config: {CONFIG_PATH}\nFallback: {FALLBACK_CONFIG_PATH}\nBase Dir: {BASE_DIR}'
+        ttk.Label(tab_main, text=info_text, font=('monospace', 8), foreground='gray').grid(row=3, column=0, sticky='w', pady=(12, 0))
+
+        # --- Settings tab ---
+        tab_settings.grid_rowconfigure(0, weight=1)
+        tab_settings.grid_columnconfigure(0, weight=1)
+
+        settings_frame = ttk.LabelFrame(tab_settings, text='Settings', padding=10)
+        settings_frame.grid(row=0, column=0, sticky='nsew')
+        settings_frame.grid_columnconfigure(1, weight=1)
+        settings_frame.grid_rowconfigure(5, weight=1)  # keywords box expands
+
         ttk.Label(settings_frame, text='Check interval (s):').grid(row=0, column=0, sticky='w')
         self.check_interval_var = tk.DoubleVar(value=self.settings.get('check_interval', 2.0))
-        ttk.Spinbox(settings_frame, from_=0.5, to=60, increment=0.5, textvariable=self.check_interval_var, width=6).grid(row=0, column=1, sticky='w')
+        ttk.Spinbox(settings_frame, from_=0.5, to=60, increment=0.5, textvariable=self.check_interval_var, width=8).grid(row=0, column=1, sticky='w')
 
         ttk.Label(settings_frame, text='Cooldown (s):').grid(row=1, column=0, sticky='w')
         self.cooldown_var = tk.DoubleVar(value=self.settings.get('cooldown', 5.0))
-        ttk.Spinbox(settings_frame, from_=0, to=60, increment=0.5, textvariable=self.cooldown_var, width=6).grid(row=1, column=1, sticky='w')
+        ttk.Spinbox(settings_frame, from_=0, to=60, increment=0.5, textvariable=self.cooldown_var, width=8).grid(row=1, column=1, sticky='w')
 
         ttk.Label(settings_frame, text='Blur radius:').grid(row=2, column=0, sticky='w')
         self.blur_var = tk.IntVar(value=self.settings.get('blur_radius', 25))
-        ttk.Scale(settings_frame, from_=1, to=60, orient='horizontal', variable=self.blur_var).grid(row=2, column=1, sticky='we')
+        ttk.Scale(settings_frame, from_=1, to=60, orient='horizontal', variable=self.blur_var).grid(row=2, column=1, sticky='ew')
 
         ttk.Label(settings_frame, text='Screenshot scale:').grid(row=3, column=0, sticky='w')
         self.scale_var = tk.DoubleVar(value=self.settings.get('screenshot_scale', 1.0))
-        ttk.Scale(settings_frame, from_=0.25, to=1.0, orient='horizontal', variable=self.scale_var).grid(row=3, column=1, sticky='we')
+        ttk.Scale(settings_frame, from_=0.25, to=1.0, orient='horizontal', variable=self.scale_var).grid(row=3, column=1, sticky='ew')
 
-        # keywords
-        ttk.Label(settings_frame, text='Sensitive keywords (comma-separated):').grid(row=4, column=0, columnspan=2, sticky='w', pady=(6,0))
-        self.keywords_text = tk.Text(settings_frame, height=4, width=40)
-        self.keywords_text.grid(row=5, column=0, columnspan=2, sticky='we')
+        ttk.Label(settings_frame, text='Sensitive keywords (comma-separated):').grid(row=4, column=0, columnspan=2, sticky='w', pady=(10, 0))
+        kw_frame = ttk.Frame(settings_frame)
+        kw_frame.grid(row=5, column=0, columnspan=2, sticky='nsew')
+        kw_frame.grid_rowconfigure(0, weight=1)
+        kw_frame.grid_columnconfigure(0, weight=1)
+        self.keywords_text = tk.Text(kw_frame, height=6, wrap='word')
+        kw_scroll = ttk.Scrollbar(kw_frame, orient='vertical', command=self.keywords_text.yview)
+        self.keywords_text.configure(yscrollcommand=kw_scroll.set)
+        self.keywords_text.grid(row=0, column=0, sticky='nsew')
+        kw_scroll.grid(row=0, column=1, sticky='ns')
         self.keywords_text.insert('1.0', ', '.join(self.settings.get('sensitive_keywords', [])))
 
-        # tesseract path
-        ttk.Label(settings_frame, text='Tesseract path:').grid(row=6, column=0, sticky='w')
+        ttk.Label(settings_frame, text='Tesseract path:').grid(row=6, column=0, sticky='w', pady=(10, 0))
         self.tess_var = tk.StringVar(value=self.settings.get('tesseract_cmd', ''))
-        ttk.Entry(settings_frame, textvariable=self.tess_var, width=40).grid(row=6, column=1, sticky='we')
+        ttk.Entry(settings_frame, textvariable=self.tess_var).grid(row=6, column=1, sticky='ew', pady=(10, 0))
 
-        # Cleanup settings
-        ttk.Separator(settings_frame, orient='horizontal').grid(row=7, column=0, columnspan=2, sticky='we', pady=6)
+        ttk.Separator(settings_frame, orient='horizontal').grid(row=7, column=0, columnspan=2, sticky='ew', pady=10)
 
         ttk.Label(settings_frame, text='Cleanup interval (hours):').grid(row=8, column=0, sticky='w')
         self.cleanup_interval_var = tk.DoubleVar(value=self.settings.get('cleanup_interval_hours', 24))
-        ttk.Spinbox(settings_frame, from_=1, to=720, increment=1, textvariable=self.cleanup_interval_var, width=6).grid(row=8, column=1, sticky='w')
+        ttk.Spinbox(settings_frame, from_=1, to=720, increment=1, textvariable=self.cleanup_interval_var, width=8).grid(row=8, column=1, sticky='w')
 
         self.cleanup_enabled_var = tk.BooleanVar(value=self.settings.get('cleanup_enabled', True))
-        ttk.Checkbutton(settings_frame, text='Auto cleanup enabled', variable=self.cleanup_enabled_var).grid(row=9, column=0, sticky='w')
+        ttk.Checkbutton(settings_frame, text='Auto cleanup enabled', variable=self.cleanup_enabled_var).grid(row=9, column=0, columnspan=2, sticky='w')
 
         self.cleanup_temp_var = tk.BooleanVar(value=self.settings.get('cleanup_temp_files', True))
-        ttk.Checkbutton(settings_frame, text='Cleanup temp files', variable=self.cleanup_temp_var).grid(row=10, column=0, sticky='w')
+        ttk.Checkbutton(settings_frame, text='Cleanup temp files', variable=self.cleanup_temp_var).grid(row=10, column=0, columnspan=2, sticky='w')
 
         self.cleanup_cache_var = tk.BooleanVar(value=self.settings.get('cleanup_cache', True))
-        ttk.Checkbutton(settings_frame, text='Cleanup cache', variable=self.cleanup_cache_var).grid(row=11, column=0, sticky='w')
+        ttk.Checkbutton(settings_frame, text='Cleanup cache', variable=self.cleanup_cache_var).grid(row=11, column=0, columnspan=2, sticky='w')
 
-        # OCR options
-        ttk.Separator(settings_frame, orient='horizontal').grid(row=12, column=0, columnspan=2, sticky='we', pady=6)
+        ttk.Separator(settings_frame, orient='horizontal').grid(row=12, column=0, columnspan=2, sticky='ew', pady=10)
 
         ttk.Label(settings_frame, text='OCR language:').grid(row=13, column=0, sticky='w')
         self.ocr_lang_var = tk.StringVar(value=self.settings.get('ocr_lang', 'eng'))
@@ -583,76 +600,35 @@ class App:
 
         ttk.Label(settings_frame, text='OCR PSM:').grid(row=14, column=0, sticky='w')
         self.ocr_psm_var = tk.IntVar(value=int(self.settings.get('ocr_psm', 6)))
-        ttk.Spinbox(settings_frame, from_=3, to=13, increment=1, textvariable=self.ocr_psm_var, width=6).grid(row=14, column=1, sticky='w')
+        ttk.Spinbox(settings_frame, from_=3, to=13, increment=1, textvariable=self.ocr_psm_var, width=8).grid(row=14, column=1, sticky='w')
 
         ttk.Label(settings_frame, text='OCR OEM:').grid(row=15, column=0, sticky='w')
         self.ocr_oem_var = tk.IntVar(value=int(self.settings.get('ocr_oem', 3)))
-        ttk.Spinbox(settings_frame, from_=0, to=3, increment=1, textvariable=self.ocr_oem_var, width=6).grid(row=15, column=1, sticky='w')
+        ttk.Spinbox(settings_frame, from_=0, to=3, increment=1, textvariable=self.ocr_oem_var, width=8).grid(row=15, column=1, sticky='w')
 
-        # Behavior / tray / UI scaling
-        ttk.Separator(settings_frame, orient='horizontal').grid(row=16, column=0, columnspan=2, sticky='we', pady=6)
+        ttk.Separator(settings_frame, orient='horizontal').grid(row=16, column=0, columnspan=2, sticky='ew', pady=10)
 
         self.start_minimized_var = tk.BooleanVar(value=self.settings.get('start_minimized', False))
-        ttk.Checkbutton(settings_frame, text='Run minimized on start', variable=self.start_minimized_var).grid(row=17, column=0, sticky='w')
+        ttk.Checkbutton(settings_frame, text='Run minimized on start', variable=self.start_minimized_var).grid(row=17, column=0, columnspan=2, sticky='w')
 
         self.minimize_to_tray_var = tk.BooleanVar(value=self.settings.get('minimize_to_tray', True))
         tray_text = 'Minimize to system tray' if self.tray.available else 'Minimize to system tray (requires pystray)'
-        ttk.Checkbutton(settings_frame, text=tray_text, variable=self.minimize_to_tray_var).grid(row=18, column=0, sticky='w')
-
-        ttk.Label(settings_frame, text='UI scale:').grid(row=19, column=0, sticky='w', pady=(6, 0))
-        self.ui_scale_var = tk.DoubleVar(value=float(self.settings.get('ui_scale', 1.0)))
-        ttk.Scale(
-            settings_frame,
-            from_=0.75,
-            to=2.0,
-            orient='horizontal',
-            variable=self.ui_scale_var,
-            command=lambda v: self._schedule_apply_ui_scale(v),
-        ).grid(row=19, column=1, sticky='we', pady=(6, 0))
-        ttk.Button(settings_frame, text='Apply UI scale', command=lambda: self._apply_ui_scale(self.ui_scale_var.get())).grid(row=20, column=0, sticky='w', pady=(2, 0))
+        ttk.Checkbutton(settings_frame, text=tray_text, variable=self.minimize_to_tray_var).grid(row=18, column=0, columnspan=2, sticky='w')
 
         self.fade_overlay_var = tk.BooleanVar(value=self.settings.get('fade_overlay', True))
-        ttk.Checkbutton(settings_frame, text='Fade overlay', variable=self.fade_overlay_var).grid(row=21, column=0, sticky='w', pady=(6, 0))
+        ttk.Checkbutton(settings_frame, text='Fade overlay', variable=self.fade_overlay_var).grid(row=19, column=0, columnspan=2, sticky='w', pady=(10, 0))
 
-        ttk.Label(settings_frame, text='Overlay alpha:').grid(row=22, column=0, sticky='w')
+        ttk.Label(settings_frame, text='Overlay alpha:').grid(row=20, column=0, sticky='w')
         self.overlay_alpha_var = tk.DoubleVar(value=float(self.settings.get('overlay_alpha', 0.98)))
-        ttk.Scale(settings_frame, from_=0.2, to=1.0, orient='horizontal', variable=self.overlay_alpha_var).grid(row=22, column=1, sticky='we')
+        ttk.Scale(settings_frame, from_=0.2, to=1.0, orient='horizontal', variable=self.overlay_alpha_var).grid(row=20, column=1, sticky='ew')
 
-        ttk.Label(settings_frame, text='Fade duration (ms):').grid(row=23, column=0, sticky='w')
+        ttk.Label(settings_frame, text='Fade duration (ms):').grid(row=21, column=0, sticky='w')
         self.overlay_fade_ms_var = tk.IntVar(value=int(self.settings.get('overlay_fade_ms', 300)))
-        ttk.Spinbox(settings_frame, from_=0, to=5000, increment=50, textvariable=self.overlay_fade_ms_var, width=8).grid(row=23, column=1, sticky='w')
+        ttk.Spinbox(settings_frame, from_=0, to=5000, increment=50, textvariable=self.overlay_fade_ms_var, width=10).grid(row=21, column=1, sticky='w')
 
-        ttk.Label(settings_frame, text='Fade steps:').grid(row=24, column=0, sticky='w')
+        ttk.Label(settings_frame, text='Fade steps:').grid(row=22, column=0, sticky='w')
         self.overlay_fade_steps_var = tk.IntVar(value=int(self.settings.get('overlay_fade_steps', 10)))
-        ttk.Spinbox(settings_frame, from_=1, to=60, increment=1, textvariable=self.overlay_fade_steps_var, width=8).grid(row=24, column=1, sticky='w')
-
-        # Save button
-        save_row = ttk.Frame(frm)
-        save_row.pack(fill='x', pady=6)
-        ttk.Button(save_row, text='Save Settings', command=self.save).pack(side='left')
-        ttk.Button(save_row, text='Clean Now', command=self.cleanup_now).pack(side='left', padx=6)
-        if self.tray.available:
-            ttk.Button(save_row, text='Show Tray Icon', command=self.tray.start).pack(side='left', padx=6)
-
-        # Status area
-        status_row = ttk.Frame(frm)
-        status_row.pack(fill='x', pady=(6,0))
-        self.status_var = tk.StringVar(value='Idle')
-        self.status_label = ttk.Label(status_row, textvariable=self.status_var)
-        self.status_label.pack(side='left')
-
-        self.last_check_var = tk.StringVar(value='Checks: 0')
-        self.last_check_label = ttk.Label(status_row, textvariable=self.last_check_var)
-        self.last_check_label.pack(side='right')
-
-        for i in range(2):
-            settings_frame.grid_columnconfigure(i, weight=1)
-
-        # Info label
-        info_frame = ttk.Frame(frm)
-        info_frame.pack(fill='x', pady=6)
-        info_text = f'Config: {CONFIG_PATH}\nFallback: {FALLBACK_CONFIG_PATH}\nBase Dir: {BASE_DIR}'
-        ttk.Label(info_frame, text=info_text, font=('monospace', 8), foreground='gray').pack(anchor='w')
+        ttk.Spinbox(settings_frame, from_=1, to=60, increment=1, textvariable=self.overlay_fade_steps_var, width=10).grid(row=22, column=1, sticky='w')
 
     def start(self):
         self._update_settings_from_ui()
@@ -698,7 +674,6 @@ class App:
 
             self.settings['start_minimized'] = self.start_minimized_var.get()
             self.settings['minimize_to_tray'] = self.minimize_to_tray_var.get()
-            self.settings['ui_scale'] = float(self.ui_scale_var.get())
 
             self.settings['fade_overlay'] = self.fade_overlay_var.get()
             self.settings['overlay_alpha'] = float(self.overlay_alpha_var.get())
